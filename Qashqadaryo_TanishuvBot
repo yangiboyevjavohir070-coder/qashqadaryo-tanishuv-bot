@@ -1,0 +1,135 @@
+import logging
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler, ConversationHandler
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+from config import TOKEN
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+users = {}
+waiting_approval = []
+
+NAME, AGE, REGION, PHOTO = range(4)
+
+
+def start(update, context):
+    update.message.reply_text("Assalomu alaykum! Qashqadaryo Tanishuv Botga xush kelibsiz.\n"
+                              "Keling, profilingizni yaratamiz.\n\nIsmingizni kiriting:")
+    return NAME
+
+
+def get_name(update, context):
+    user_id = update.message.from_user.id
+    users[user_id] = {"name": update.message.text}
+    update.message.reply_text("Yoshingizni kiriting:")
+    return AGE
+
+
+def get_age(update, context):
+    user_id = update.message.from_user.id
+    users[user_id]["age"] = update.message.text
+    update.message.reply_text("Qaysi tumandasiz? (Masalan: Mirishkor)")
+    return REGION
+
+
+def get_region(update, context):
+    user_id = update.message.from_user.id
+    users[user_id]["region"] = update.message.text
+    update.message.reply_text("Rasmingizni yuboring:")
+    return PHOTO
+
+
+def get_photo(update, context):
+    user_id = update.message.from_user.id
+    photo = update.message.photo[-1].get_file()
+    users[user_id]["photo"] = photo.file_id
+
+    waiting_approval.append(user_id)
+
+    update.message.reply_text("Profil yaratildi! Endi admin tasdiqlashi kerak.")
+    notify_admin(update, context, user_id)
+
+    return ConversationHandler.END
+
+
+def notify_admin(update, context, user_id):
+    keyboard = [
+        [InlineKeyboardButton("Tasdiqlash", callback_data=f"yes_{user_id}")],
+        [InlineKeyboardButton("Rad etish", callback_data=f"no_{user_id}")]
+    ]
+
+    context.bot.send_photo(
+        chat_id=update.message.chat_id,
+        photo=users[user_id]["photo"],
+        caption=f"Yangi anketa:\n"
+                f"Ism: {users[user_id]['name']}\n"
+                f"Yosh: {users[user_id]['age']}\n"
+                f"Hudud: {users[user_id]['region']}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+def button(update, context):
+    query = update.callback_query
+    data = query.data
+
+    if data.startswith("yes_"):
+        user_id = int(data.replace("yes_", ""))
+        context.bot.send_message(user_id, "Profilingiz admin tomonidan tasdiqlandi! Endi tanishishingiz mumkin.")
+        query.answer("Tasdiqlandi")
+    elif data.startswith("no_"):
+        user_id = int(data.replace("no_", ""))
+        context.bot.send_message(user_id, "Afsus, profil tasdiqlanmadi.")
+        query.answer("Rad etildi")
+
+
+def browse(update, context):
+    user_region = users.get(update.message.from_user.id, {}).get("region")
+
+    if not user_region:
+        update.message.reply_text("Avval profil yarating: /start")
+        return
+
+    for uid, data in users.items():
+        if uid == update.message.from_user.id:
+            continue
+        if data.get("region") == user_region:
+            context.bot.send_photo(
+                chat_id=update.message.chat_id,
+                photo=data["photo"],
+                caption=f"Ism: {data['name']}\nYosh: {data['age']}\nHudud: {data['region']}",
+            )
+            return
+
+    update.message.reply_text("Hududingizdan hech kim topilmadi.")
+
+
+def main():
+    updater = Updater(TOKEN)
+    dp = updater.dispatcher
+
+    conv = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            NAME: [MessageHandler(Filters.text, get_name)],
+            AGE: [MessageHandler(Filters.text, get_age)],
+            REGION: [MessageHandler(Filters.text, get_region)],
+            PHOTO: [MessageHandler(Filters.photo, get_photo)]
+        },
+        fallbacks=[]
+    )
+
+    dp.add_handler(conv)
+    dp.add_handler(CommandHandler("browse", browse))
+    dp.add_handler(CallbackQueryHandler(button))
+
+    updater.start_polling()
+    updater.idle()
+
+
+if __name__ == '__main__':
+    main()
+TOKEN = "8549112245:AAHkh12Yax1rPmur-AGAfAZTzaYE9dAs-xY"
+python-telegram-bot==13.15
+Pillow
+worker: python3 main.py
